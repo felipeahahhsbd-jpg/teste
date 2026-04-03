@@ -90,6 +90,9 @@ export default function ProductsPage() {
   const [investments, setInvestments] = useState<Investment[]>([]);
   const [loading, setLoading] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
+  
+  // NOVO ESTADO: Guarda qual produto o usuário clicou para comprar
+  const [productToConfirm, setProductToConfirm] = useState<Product | null>(null);
 
   useEffect(() => {
     const init = async () => {
@@ -240,11 +243,13 @@ export default function ProductsPage() {
       toast.error('Saldo insuficiente', {
         description: 'Faça um depósito para continuar'
       });
+      setProductToConfirm(null); // Fecha o modal se falhar
       return;
     }
 
     if (!user?.id) {
       toast.error('Erro de autenticação');
+      setProductToConfirm(null);
       return;
     }
 
@@ -270,11 +275,13 @@ export default function ProductsPage() {
         description: `Você adquiriu o ${product.name} com sucesso`
       });
       
+      setProductToConfirm(null); // FECHA O MODAL APÓS O SUCESSO
       processInvestments(true);
 
     } catch (err) {
       console.error('Error investing:', err);
       toast.error('Erro ao realizar investimento');
+      setProductToConfirm(null);
     }
   };
 
@@ -390,9 +397,9 @@ export default function ProductsPage() {
                   </p>
                 </div>
 
-                {/* Buy Button */}
+                {/* Buy Button MODIFICADO */}
                 <button
-                  onClick={() => handleInvestment(product)}
+                  onClick={() => setProductToConfirm(product)} // AQUI: em vez de comprar direto, abre o modal
                   disabled={!canBuy}
                   className={`w-full py-3 rounded-xl font-bold text-sm transition-all ${
                     canBuy
@@ -407,6 +414,57 @@ export default function ProductsPage() {
           );
         })}
       </div>
+
+      {/* =========================================================
+          NOVO MODAL DE CONFIRMAÇÃO DE COMPRA
+          ========================================================= */}
+      <Dialog open={!!productToConfirm} onOpenChange={(open) => !open && setProductToConfirm(null)}>
+        <DialogContent className="bg-[#111111] border-[#1a1a1a] text-white max-w-md mx-auto w-[90%] rounded-xl">
+          <DialogHeader className="border-b border-[#1a1a1a] pb-4">
+            <DialogTitle className="text-xl font-bold text-white flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-yellow-500" />
+              Confirmar Compra
+            </DialogTitle>
+            <DialogDescription className="text-gray-400 mt-2">
+              Você está prestes a adquirir um novo minerador. Confira os detalhes abaixo:
+            </DialogDescription>
+          </DialogHeader>
+
+          {productToConfirm && (
+            <div className="pt-4 space-y-4">
+              <div className="bg-[#0a0a0a] rounded-lg p-4 border border-[#1a1a1a]">
+                <div className="flex justify-between mb-3 pb-3 border-b border-[#1a1a1a]">
+                  <span className="text-gray-400">Produto:</span>
+                  <span className="font-bold text-white">{productToConfirm.name}</span>
+                </div>
+                <div className="flex justify-between mb-3 pb-3 border-b border-[#1a1a1a]">
+                  <span className="text-gray-400">Valor a descontar:</span>
+                  <span className="font-bold text-[#ef4444]">- R$ {Number(productToConfirm.price).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Retorno Diário:</span>
+                  <span className="font-bold text-[#22c55e]">+ R$ {Number(productToConfirm.daily_return).toFixed(2)}</span>
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <Button
+                  onClick={() => setProductToConfirm(null)}
+                  className="flex-1 bg-transparent border border-gray-600 text-gray-300 hover:bg-[#1a1a1a] hover:text-white"
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={() => handleInvestment(productToConfirm)}
+                  className="flex-1 bg-[#22c55e] hover:bg-[#16a34a] text-white border-none"
+                >
+                  Confirmar Compra
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* History Modal */}
       <Dialog open={showHistory} onOpenChange={setShowHistory}>
