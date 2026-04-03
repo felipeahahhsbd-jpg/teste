@@ -23,15 +23,6 @@ const BONUS_TIERS = [
   { id: 'lvl5', goal: 5000, reward: 800, label: 'Líder Diamante' }
 ];
 
-// Configuração dos Níveis de Salário Semanal (Pagamento Recorrente)
-const SALARY_TIERS = [
-  { id: 'sal1', goal: 500, reward: 50, label: 'Salário Bronze' },
-  { id: 'sal2', goal: 1500, reward: 150, label: 'Salário Prata' },
-  { id: 'sal3', goal: 3000, reward: 300, label: 'Salário Ouro' },
-  { id: 'sal4', goal: 6000, reward: 600, label: 'Salário Esmeralda' },
-  { id: 'sal5', goal: 10000, reward: 1000, label: 'Salário Diamante' }
-];
-
 export default function ProfilePage() {
   const { user } = useAuth();
   const { transactions } = useTransactions();
@@ -157,9 +148,9 @@ export default function ProfilePage() {
     }
   };
 
-  const handleClaimSalary = async (tierId: string, amount: number) => {
-    if (!user?.id) return;
-    setClaiming(tierId);
+  const handleClaimSalary = async (amount: number) => {
+    if (!user?.id || amount <= 0) return;
+    setClaiming('salary');
     try {
       const db = getFirestore();
       const userRef = doc(db, 'users', user.id);
@@ -167,12 +158,12 @@ export default function ProfilePage() {
       
       if (userSnap.exists()) {
         const userData = userSnap.data();
-        const lastClaims = userData.lastSalaryClaims || {};
-        const lastClaimTime = lastClaims[tierId] || 0;
+        const lastClaimTime = userData.lastSalaryClaim || 0;
         const now = Date.now();
         const sevenDaysInMs = 7 * 24 * 60 * 60 * 1000;
 
-        if (now - lastClaimTime < sevenDaysInMs) {
+        // Verifica novamente no backend se os 7 dias já passaram
+        if (lastClaimTime > 0 && now - lastClaimTime < sevenDaysInMs) {
           toast.error("Você precisa aguardar 7 dias após o último saque deste salário.");
           return;
         }
@@ -181,7 +172,7 @@ export default function ProfilePage() {
         
         await updateDoc(userRef, {
           balance: newBalance,
-          [`lastSalaryClaims.${tierId}`]: now // Salva o timestamp do resgate
+          lastSalaryClaim: now // Salva o novo timestamp de resgate
         });
 
         toast.success(`💸 Salário Semanal de R$ ${amount.toFixed(2)} recebido com sucesso!`);
@@ -356,7 +347,7 @@ export default function ProfilePage() {
                   </div>
                   <div>
                     <p className="text-white font-bold text-sm">Salário Semanal</p>
-                    <p className="text-gray-400 text-xs">Pagamento fixo a cada 7 dias</p>
+                    <p className="text-gray-400 text-xs">Ganhe 10% da sua equipe a cada 7 dias</p>
                   </div>
                 </div>
                 <span className="text-gray-500">→</span>
@@ -509,12 +500,27 @@ export default function ProfilePage() {
   };
 
   const renderWeeklySalary = () => {
-    const lastClaims = user?.lastSalaryClaims || {};
+    // Configurações de tempo e cálculo
+    const lastClaimTime = user?.lastSalaryClaim || 0;
     const now = Date.now();
     const sevenDaysInMs = 7 * 24 * 60 * 60 * 1000;
+    const timePassed = now - lastClaimTime;
     
-    const maxGoal = SALARY_TIERS[SALARY_TIERS.length - 1].goal;
-    const progress = Math.min((teamTotal / maxGoal) * 100, 100);
+    // Calcula apenas valores múltiplos de 100 (Ex: se tem 250, calcula sobre 200)
+    const roundedTeamTotal = Math.floor(teamTotal / 100) * 100;
+    const expectedSalary = roundedTeamTotal * 0.10; // Salário é 10%
+    
+    // Lógica de tempo (se lastClaimTime for 0, é o primeiro saque e daysLeft é 0)
+    const isTimeLocked = lastClaimTime > 0 && timePassed < sevenDaysInMs;
+    let daysLeft = 0;
+    
+    if (isTimeLocked) {
+      // Arredonda para cima para não mostrar 0 dias se faltarem horas
+      daysLeft = Math.ceil((sevenDaysInMs - timePassed) / (1000 * 60 * 60 * 24));
+    }
+
+    const canClaim = expectedSalary > 0 && daysLeft === 0;
+    const isProcessing = claiming === 'salary';
 
     return (
       <div className="space-y-6 animate-fade-in">
@@ -530,84 +536,60 @@ export default function ProfilePage() {
             <Calendar className="w-8 h-8 text-blue-400" />
           </div>
           <h2 className="text-2xl font-bold text-white mb-2">Salário Semanal</h2>
-          <p className="text-gray-400 text-sm">Bata as metas de depósito da equipe e garanta um salário fixo a cada 7 dias direto no seu saldo.</p>
+          <p className="text-gray-400 text-sm">Receba 10% do depósito da sua equipe a cada 7 dias. O cálculo é feito com base em múltiplos de R$ 100 (ex: R$ 100, R$ 200).</p>
         </div>
 
         <Card className="bg-[#111111]/80 backdrop-blur-sm border-[#1a1a1a]">
-          <CardContent className="pt-6">
-            <p className="text-gray-400 text-xs mb-1 text-center">Investimento Total da Equipe</p>
-            <p className="text-3xl font-bold text-blue-400 text-center mb-4">
-              {isFetchingTeam ? '...' : `R$ ${teamTotal.toFixed(2)}`}
-            </p>
-            <div className="w-full h-3 bg-[#1a1a1a] rounded-full overflow-hidden border border-blue-500/10">
-              <div 
-                className="h-full bg-gradient-to-r from-blue-500 to-blue-400 transition-all duration-1000" 
-                style={{ width: `${progress}%` }} 
-              />
+          <CardContent className="pt-6 text-center space-y-4">
+            <div>
+              <p className="text-gray-400 text-xs mb-1">Investimento Total da Equipe</p>
+              <p className="text-2xl font-bold text-white">
+                {isFetchingTeam ? '...' : `R$ ${teamTotal.toFixed(2)}`}
+              </p>
+            </div>
+            <div className="border-t border-[#1a1a1a] pt-4">
+              <p className="text-gray-400 text-xs mb-1">Valor Considerado (Múltiplos de 100)</p>
+              <p className="text-xl font-bold text-blue-400">
+                R$ {roundedTeamTotal.toFixed(2)}
+              </p>
             </div>
           </CardContent>
         </Card>
 
-        <div className="space-y-3">
-          {SALARY_TIERS.map((tier) => {
-            const lastClaimTime = lastClaims[tier.id] || 0;
-            const timePassed = now - lastClaimTime;
-            const isTimeLocked = timePassed < sevenDaysInMs;
-            
-            const hasMetGoal = teamTotal >= tier.goal;
-            const canClaim = hasMetGoal && !isTimeLocked;
-            const isProcessing = claiming === tier.id;
-            const progressToTier = Math.min((teamTotal / tier.goal) * 100, 100);
+        <Card className={`bg-[#111111]/80 backdrop-blur-sm border ${canClaim ? 'border-blue-500/50 shadow-lg shadow-blue-500/10' : 'border-[#1a1a1a]'} transition-all`}>
+          <CardContent className="p-6 text-center">
+            <p className="text-gray-400 text-sm mb-2">Seu Salário Semanal Projetado (10%)</p>
+            <p className={`text-4xl font-bold mb-6 ${expectedSalary > 0 ? 'text-[#22c55e]' : 'text-gray-500'}`}>
+              R$ {expectedSalary.toFixed(2)}
+            </p>
 
-            // Calcula dias restantes se estiver bloqueado por tempo
-            let daysLeft = 0;
-            if (isTimeLocked) {
-              daysLeft = Math.ceil((sevenDaysInMs - timePassed) / (1000 * 60 * 60 * 24));
-            }
+            <div className="flex flex-col items-center justify-center gap-4">
+              <div className="flex items-center gap-2 bg-[#1a1a1a] px-4 py-3 rounded-lg border border-blue-500/20 w-full justify-center">
+                <Clock className={`w-5 h-5 ${daysLeft === 0 ? 'text-[#22c55e]' : 'text-blue-400'}`} />
+                <span className="text-white font-medium">
+                  Dias para liberação: <span className={`font-bold ${daysLeft === 0 ? 'text-[#22c55e]' : 'text-blue-400'}`}>{daysLeft}</span>
+                </span>
+              </div>
 
-            return (
-              <Card key={tier.id} className={`bg-[#111111]/80 backdrop-blur-sm border ${canClaim ? 'border-blue-500/50 shadow-lg shadow-blue-500/10' : 'border-[#1a1a1a]'} transition-all`}>
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div>
-                      <p className={`font-bold text-lg ${canClaim ? 'text-blue-400' : 'text-white'}`}>
-                        {tier.label}
-                      </p>
-                      <p className="text-xs text-gray-500">Meta: R$ {tier.goal.toFixed(2)}</p>
-                    </div>
-                    
-                    {hasMetGoal && isTimeLocked ? (
-                      <div className="bg-[#1a1a1a] border border-blue-500/20 text-blue-400/70 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">
-                        <Clock className="w-4 h-4" /> Em {daysLeft} dia(s)
-                      </div>
-                    ) : canClaim ? (
-                      <Button 
-                        onClick={() => handleClaimSalary(tier.id, tier.reward)}
-                        disabled={isProcessing}
-                        className="bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-600 text-white font-bold shadow-lg shadow-blue-500/20"
-                      >
-                        {isProcessing ? 'Sacando...' : `SACAR R$ ${tier.reward}`}
-                      </Button>
-                    ) : (
-                      <div className="text-right">
-                        <p className="text-xs text-gray-500 font-mono mb-1">Falta R$ {(tier.goal - teamTotal).toFixed(0)}</p>
-                        <div className="bg-[#1a1a1a] px-3 py-1 rounded-md text-gray-400 text-xs font-semibold">
-                          Semanal: R$ {tier.reward}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  
-                  {!hasMetGoal && (
-                     <div className="w-full h-1.5 bg-[#1a1a1a] rounded-full overflow-hidden mt-2">
-                       <div className="h-full bg-blue-500/50" style={{ width: `${progressToTier}%` }} />
-                     </div>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+              {canClaim ? (
+                <Button 
+                  onClick={() => handleClaimSalary(expectedSalary)}
+                  disabled={isProcessing}
+                  className="w-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-600 text-white font-bold shadow-lg shadow-blue-500/20 py-6 text-lg"
+                >
+                  {isProcessing ? 'PROCESSANDO...' : `RESGATAR R$ ${expectedSalary.toFixed(2)}`}
+                </Button>
+              ) : (
+                <Button 
+                  disabled 
+                  className="w-full bg-[#1a1a1a] text-gray-500 font-bold py-6 text-lg border border-[#2a2a2a]"
+                >
+                  {expectedSalary === 0 ? 'SEM SALDO DA EQUIPE' : 'AGUARDE O PRAZO'}
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   };
