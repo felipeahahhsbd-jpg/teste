@@ -5,7 +5,8 @@ if (!admin.apps.length) {
     credential: admin.credential.cert({
       projectId: process.env.FIREBASE_PROJECT_ID,
       clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
+      // Limpeza extra na privateKey para evitar erros de caractere no Netlify
+      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n').replace(/"/g, '')
     })
   });
 }
@@ -13,22 +14,35 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 
 exports.handler = async (event) => {
+  // Headers padrão para evitar erros de CORS no navegador
+  const headers = {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS'
+  };
+
+  // Resposta para pre-flight do navegador
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 200, headers, body: '' };
+  }
+
   try {
     const { userId } = event.queryStringParameters || {};
 
     if (!userId) {
       return { 
         statusCode: 400, 
+        headers,
         body: JSON.stringify({ error: 'userId é obrigatório' }) 
       };
     }
 
-    // Define o início do dia de hoje (00:00:00)
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const startTimestamp = admin.firestore.Timestamp.fromDate(startOfDay);
 
-    // 1. Ganhos de Hoje (Busca na coleção 'deposits' que vimos no print)
+    // 1. Ganhos de Hoje
     const depositsQuery = await db.collection('deposits')
       .where('userId', '==', userId)
       .where('status', '==', 'completed')
@@ -37,12 +51,10 @@ exports.handler = async (event) => {
 
     let todayEarnings = 0;
     depositsQuery.forEach(doc => {
-      const data = doc.data();
-      // Soma o campo 'amount' que aparece no seu print
-      todayEarnings += Number(data.amount || 0);
+      todayEarnings += Number(doc.data().amount || 0);
     });
 
-    // 2. Convidados de Hoje (Novos usuários que este user indicou hoje)
+    // 2. Convidados de Hoje
     const invitesQuery = await db.collection('users')
       .where('referredBy', '==', userId)
       .where('createdAt', '>=', startTimestamp)
@@ -50,19 +62,18 @@ exports.handler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: { 
-        'Content-Type': 'application/json', 
-        'Access-Control-Allow-Origin': '*' 
-      },
+      headers,
       body: JSON.stringify({
         todayEarnings: todayEarnings,
         newInvites: invitesQuery.size
       })
     };
+
   } catch (error) {
     console.error("Erro na função stats:", error);
     return { 
       statusCode: 500, 
+      headers,
       body: JSON.stringify({ error: error.message }) 
     };
   }
