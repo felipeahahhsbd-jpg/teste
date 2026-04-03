@@ -39,6 +39,7 @@ export default function ProfilePage() {
 
   // Estados da Equipe (Carreira e Salário)
   const [teamTotal, setTeamTotal] = useState(0);
+  const [salaryTimerStart, setSalaryTimerStart] = useState<number>(0);
   const [isFetchingTeam, setIsFetchingTeam] = useState(false);
   const [claiming, setClaiming] = useState<string | null>(null);
 
@@ -105,6 +106,21 @@ export default function ProfilePage() {
       }
 
       setTeamTotal(total);
+
+      // LÓGICA DO CRONÔMETRO DE SALÁRIO
+      const userRef = doc(db, 'users', user.id);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+        const uData = userSnap.data();
+        let currentTimer = uData.salaryTimerStart || 0;
+        
+        // Se a equipe atingiu R$ 100 e o contador nunca iniciou, inicia agora
+        if (total >= 100 && currentTimer === 0) {
+          currentTimer = Date.now();
+          await updateDoc(userRef, { salaryTimerStart: currentTimer });
+        }
+        setSalaryTimerStart(currentTimer);
+      }
     } catch (error) {
       console.error("Erro ao buscar dados da equipe:", error);
       toast.error("Erro ao carregar dados da equipe");
@@ -158,13 +174,13 @@ export default function ProfilePage() {
       
       if (userSnap.exists()) {
         const userData = userSnap.data();
-        const lastClaimTime = userData.lastSalaryClaim || 0;
+        const currentTimer = userData.salaryTimerStart || 0;
         const now = Date.now();
         const sevenDaysInMs = 7 * 24 * 60 * 60 * 1000;
 
-        // Verifica novamente no backend se os 7 dias já passaram
-        if (lastClaimTime > 0 && now - lastClaimTime < sevenDaysInMs) {
-          toast.error("Você precisa aguardar 7 dias após o último saque deste salário.");
+        // Verifica no backend se os 7 dias realmente já passaram
+        if (currentTimer === 0 || now - currentTimer < sevenDaysInMs) {
+          toast.error("Você precisa aguardar 7 dias do ciclo atual.");
           return;
         }
 
@@ -172,7 +188,7 @@ export default function ProfilePage() {
         
         await updateDoc(userRef, {
           balance: newBalance,
-          lastSalaryClaim: now // Salva o novo timestamp de resgate
+          salaryTimerStart: now // Reinicia o timer para os próximos 7 dias
         });
 
         toast.success(`💸 Salário Semanal de R$ ${amount.toFixed(2)} recebido com sucesso!`);
@@ -500,26 +516,27 @@ export default function ProfilePage() {
   };
 
   const renderWeeklySalary = () => {
-    // Configurações de tempo e cálculo
-    const lastClaimTime = user?.lastSalaryClaim || 0;
-    const now = Date.now();
-    const sevenDaysInMs = 7 * 24 * 60 * 60 * 1000;
-    const timePassed = now - lastClaimTime;
-    
-    // Calcula apenas valores múltiplos de 100 (Ex: se tem 250, calcula sobre 200)
     const roundedTeamTotal = Math.floor(teamTotal / 100) * 100;
     const expectedSalary = roundedTeamTotal * 0.10; // Salário é 10%
     
-    // Lógica de tempo (se lastClaimTime for 0, é o primeiro saque e daysLeft é 0)
-    const isTimeLocked = lastClaimTime > 0 && timePassed < sevenDaysInMs;
-    let daysLeft = 0;
+    // Lógica de tempo atualizada
+    const now = Date.now();
+    const sevenDaysInMs = 7 * 24 * 60 * 60 * 1000;
     
-    if (isTimeLocked) {
-      // Arredonda para cima para não mostrar 0 dias se faltarem horas
-      daysLeft = Math.ceil((sevenDaysInMs - timePassed) / (1000 * 60 * 60 * 24));
+    let daysLeft = 7;
+    let isCounting = false;
+    
+    if (salaryTimerStart > 0) {
+      isCounting = true;
+      const timePassed = now - salaryTimerStart;
+      if (timePassed >= sevenDaysInMs) {
+        daysLeft = 0;
+      } else {
+        daysLeft = Math.ceil((sevenDaysInMs - timePassed) / (1000 * 60 * 60 * 24));
+      }
     }
 
-    const canClaim = expectedSalary > 0 && daysLeft === 0;
+    const canClaim = expectedSalary > 0 && daysLeft === 0 && isCounting;
     const isProcessing = claiming === 'salary';
 
     return (
@@ -536,7 +553,7 @@ export default function ProfilePage() {
             <Calendar className="w-8 h-8 text-blue-400" />
           </div>
           <h2 className="text-2xl font-bold text-white mb-2">Salário Semanal</h2>
-          <p className="text-gray-400 text-sm">Receba 10% do depósito da sua equipe a cada 7 dias. O cálculo é feito com base em múltiplos de R$ 100 (ex: R$ 100, R$ 200).</p>
+          <p className="text-gray-400 text-sm">Receba 10% da sua equipe a cada 7 dias. O cronômetro inicia automaticamente quando sua equipe bater a meta de R$ 100.</p>
         </div>
 
         <Card className="bg-[#111111]/80 backdrop-blur-sm border-[#1a1a1a]">
@@ -565,13 +582,24 @@ export default function ProfilePage() {
 
             <div className="flex flex-col items-center justify-center gap-4">
               <div className="flex items-center gap-2 bg-[#1a1a1a] px-4 py-3 rounded-lg border border-blue-500/20 w-full justify-center">
-                <Clock className={`w-5 h-5 ${daysLeft === 0 ? 'text-[#22c55e]' : 'text-blue-400'}`} />
+                <Clock className={`w-5 h-5 ${daysLeft === 0 && isCounting ? 'text-[#22c55e]' : 'text-blue-400'}`} />
                 <span className="text-white font-medium">
-                  Dias para liberação: <span className={`font-bold ${daysLeft === 0 ? 'text-[#22c55e]' : 'text-blue-400'}`}>{daysLeft}</span>
+                  {isCounting ? (
+                    <>Dias para liberação: <span className={`font-bold ${daysLeft === 0 ? 'text-[#22c55e]' : 'text-blue-400'}`}>{daysLeft}</span></>
+                  ) : (
+                    <span className="text-gray-400 text-sm">Atinga R$ 100 para iniciar a contagem</span>
+                  )}
                 </span>
               </div>
 
-              {canClaim ? (
+              {!isCounting ? (
+                <Button 
+                  disabled 
+                  className="w-full bg-[#1a1a1a] text-gray-500 font-bold py-6 text-lg border border-[#2a2a2a]"
+                >
+                  FALTA R$ {(100 - teamTotal).toFixed(2)} PARA INICIAR
+                </Button>
+              ) : canClaim ? (
                 <Button 
                   onClick={() => handleClaimSalary(expectedSalary)}
                   disabled={isProcessing}
@@ -584,7 +612,7 @@ export default function ProfilePage() {
                   disabled 
                   className="w-full bg-[#1a1a1a] text-gray-500 font-bold py-6 text-lg border border-[#2a2a2a]"
                 >
-                  {expectedSalary === 0 ? 'SEM SALDO DA EQUIPE' : 'AGUARDE O PRAZO'}
+                  AGUARDE {daysLeft} DIAS
                 </Button>
               )}
             </div>
