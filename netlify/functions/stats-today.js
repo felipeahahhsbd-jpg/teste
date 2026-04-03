@@ -16,45 +16,59 @@ exports.handler = async (event) => {
   const headers = {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization', // Liberar Authorization
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'GET, OPTIONS'
   };
 
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
 
   try {
-    // 1. Pega o token do cabeçalho Authorization
     const authHeader = event.headers.authorization || event.headers.Authorization;
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return { 
-        statusCode: 401, 
-        headers, 
-        body: JSON.stringify({ error: 'Não autorizado. Token faltando.' }) 
-      };
-    }
+    if (!authHeader) throw new Error('Token faltando');
 
     const idToken = authHeader.split('Bearer ')[1];
-
-    // 2. Verifica o token e descobre quem é o usuário (uid)
     const decodedToken = await admin.auth().verifyIdToken(idToken);
-    const userId = decodedToken.uid; // O ID do usuário "surge" aqui com segurança
+    const userId = decodedToken.uid;
 
+    // 1. Define o início do dia de hoje (00:00:00)
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const startTimestamp = admin.firestore.Timestamp.fromDate(startOfDay);
 
-    // 3. Busca Ganhos
+    let todayEarnings = 0;
+
+    // --- 2. BUSCAR NA SUBCOLEÇÃO 'transactions' DO USUÁRIO ---
+    // É aqui que ficam os ganhos de roleta, check-in, etc.
+    const transactionsRef = db.collection('users').doc(userId).collection('transactions');
+    const transactionsQuery = await transactionsRef
+      .where('createdAt', '>=', startTimestamp)
+      .get();
+
+    transactionsQuery.forEach(doc => {
+      const data = doc.data();
+      const valor = Number(data.amount || data.value || 0);
+      
+      // Somamos apenas se o valor for positivo (ganho)
+      // Se você tiver saques na mesma lista, o valor negativo não entra na soma de "Ganhos"
+      if (valor > 0) {
+        todayEarnings += valor;
+      }
+    });
+
+    // --- 3. BUSCAR DEPÓSITOS (OPCIONAL) ---
+    // Se você considera o dinheiro que ele DEPOSITOU como "ganho de hoje", mantenha este bloco.
+    // Se "Ganhos" for apenas o que ele ganhou no jogo/roleta, pode apagar este bloco.
     const depositsQuery = await db.collection('deposits')
       .where('userId', '==', userId)
       .where('status', '==', 'completed')
       .where('createdAt', '>=', startTimestamp)
       .get();
 
-    let todayEarnings = 0;
-    depositsQuery.forEach(doc => todayEarnings += Number(doc.data().amount || 0));
+    depositsQuery.forEach(doc => {
+      todayEarnings += Number(doc.data().amount || 0);
+    });
 
-    // 4. Busca Convidados
+    // --- 4. BUSCAR CONVIDADOS ---
     const invitesQuery = await db.collection('users')
       .where('referredBy', '==', userId)
       .where('createdAt', '>=', startTimestamp)
@@ -64,17 +78,17 @@ exports.handler = async (event) => {
       statusCode: 200,
       headers,
       body: JSON.stringify({
-        todayEarnings,
+        todayEarnings: todayEarnings,
         newInvites: invitesQuery.size
       })
     };
 
   } catch (error) {
-    console.error("Erro:", error);
+    console.error("Erro na função:", error);
     return { 
       statusCode: 403, 
       headers, 
-      body: JSON.stringify({ error: 'Token inválido ou expirado.' }) 
+      body: JSON.stringify({ error: 'Erro ao buscar dados' }) 
     };
   }
 };
