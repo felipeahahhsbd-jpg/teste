@@ -28,7 +28,7 @@ import { auth, db } from '../firebase/firebase';
    INTERFACE USER
 ========================= */
 
-interface User {
+export interface User {
   id: string;
   name: string;
   email: string;
@@ -40,10 +40,7 @@ interface User {
   totalWithdrawn: number;
   totalDeposited: number;
   totalCommissions: number;
-
-  // ✅ CORRIGIDO AQUI
-  girosRoleta: number;
-
+  girosRoleta: number; // ✅ Padronizado
   role: string;
   createdAt: any;
 }
@@ -126,10 +123,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           totalWithdrawn: data.totalWithdrawn || 0,
           totalDeposited: data.totalDeposited || 0,
           totalCommissions: data.totalCommissions || 0,
-
-          // ✅ CORREÇÃO REAL DO BUG
-          girosRoleta: data.girosRoleta || 0,
-
+          girosRoleta: data.girosRoleta || 0, // ✅ Bate exatamente com o banco
           role: data.role || 'user',
           referredBy: data.referredBy || data.invitedBy || null,
           invitedBy: data.invitedBy || null,
@@ -148,7 +142,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   /* =========================
-     REGISTER
+     REGISTER & AUTH
   ========================= */
 
   const register = async (
@@ -193,10 +187,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       totalWithdrawn: 0,
       totalDeposited: 0,
       totalCommissions: 0,
-
-      // ✅ CORRIGIDO
-      girosRoleta: 1,
-
+      girosRoleta: 1, // ✅ Um giro inicial
       role: 'user',
       createdAt: serverTimestamp()
     });
@@ -232,12 +223,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const completeSpin = async (prizeAmount: number) => {
     if (!auth.currentUser) return;
 
-    const userRef = doc(db, 'users', auth.currentUser.uid);
+    const uid = auth.currentUser.uid;
+    const userRef = doc(db, 'users', uid);
 
+    // ✅ Atualiza o saldo e tira 1 giro
     await updateDoc(userRef, {
       girosRoleta: increment(-1),
       balance: increment(prizeAmount),
       totalEarned: increment(prizeAmount)
+    });
+
+    // ✅ Cria o histórico para aparecer na tela de transações
+    await addDoc(collection(db, 'users', uid, 'transactions'), {
+      type: 'roulette',
+      amount: prizeAmount,
+      status: 'completed',
+      description: 'Prêmio da roleta',
+      createdAt: serverTimestamp()
     });
   };
 
