@@ -5,7 +5,6 @@ if (!admin.apps.length) {
     credential: admin.credential.cert({
       projectId: process.env.FIREBASE_PROJECT_ID,
       clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      // Limpeza extra na privateKey para evitar erros de caractere no Netlify
       privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n').replace(/"/g, '')
     })
   });
@@ -14,35 +13,38 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 
 exports.handler = async (event) => {
-  // Headers padrão para evitar erros de CORS no navegador
   const headers = {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization', // Liberar Authorization
     'Access-Control-Allow-Methods': 'GET, OPTIONS'
   };
 
-  // Resposta para pre-flight do navegador
-  if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 200, headers, body: '' };
-  }
+  if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
 
   try {
-    const { userId } = event.queryStringParameters || {};
-
-    if (!userId) {
+    // 1. Pega o token do cabeçalho Authorization
+    const authHeader = event.headers.authorization || event.headers.Authorization;
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return { 
-        statusCode: 400, 
-        headers,
-        body: JSON.stringify({ error: 'userId é obrigatório' }) 
+        statusCode: 401, 
+        headers, 
+        body: JSON.stringify({ error: 'Não autorizado. Token faltando.' }) 
       };
     }
+
+    const idToken = authHeader.split('Bearer ')[1];
+
+    // 2. Verifica o token e descobre quem é o usuário (uid)
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const userId = decodedToken.uid; // O ID do usuário "surge" aqui com segurança
 
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const startTimestamp = admin.firestore.Timestamp.fromDate(startOfDay);
 
-    // 1. Ganhos de Hoje
+    // 3. Busca Ganhos
     const depositsQuery = await db.collection('deposits')
       .where('userId', '==', userId)
       .where('status', '==', 'completed')
@@ -50,11 +52,9 @@ exports.handler = async (event) => {
       .get();
 
     let todayEarnings = 0;
-    depositsQuery.forEach(doc => {
-      todayEarnings += Number(doc.data().amount || 0);
-    });
+    depositsQuery.forEach(doc => todayEarnings += Number(doc.data().amount || 0));
 
-    // 2. Convidados de Hoje
+    // 4. Busca Convidados
     const invitesQuery = await db.collection('users')
       .where('referredBy', '==', userId)
       .where('createdAt', '>=', startTimestamp)
@@ -64,17 +64,17 @@ exports.handler = async (event) => {
       statusCode: 200,
       headers,
       body: JSON.stringify({
-        todayEarnings: todayEarnings,
+        todayEarnings,
         newInvites: invitesQuery.size
       })
     };
 
   } catch (error) {
-    console.error("Erro na função stats:", error);
+    console.error("Erro:", error);
     return { 
-      statusCode: 500, 
-      headers,
-      body: JSON.stringify({ error: error.message }) 
+      statusCode: 403, 
+      headers, 
+      body: JSON.stringify({ error: 'Token inválido ou expirado.' }) 
     };
   }
 };
