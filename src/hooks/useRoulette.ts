@@ -11,7 +11,7 @@ import {
 import { db } from '../firebase/firebase';
 import { useAuth } from '../contexts/AuthContext';
 
-// Probabilidades
+// Probabilidades (Restaurado com todos os valores originais)
 const PRIZES = [
   { value: 1, weight: 40 },
   { value: 5, weight: 35 },
@@ -34,7 +34,7 @@ export function useRoulette() {
     checkCanSpin();
   }, [user]);
 
-  // ✅ AGORA USA O AUTHCONTEXT (REALTIME)
+  // Mantive a sua função original para checar os giros
   const checkCanSpin = async () => {
     if (!user) {
       setGirosDisponiveis(0);
@@ -44,6 +44,7 @@ export function useRoulette() {
     }
 
     try {
+      // ✅ CORREÇÃO: Agora ele lê do campo certo no banco (girosRoleta)
       const giros = user.girosRoleta || 0;
 
       setGirosDisponiveis(giros);
@@ -76,20 +77,20 @@ export function useRoulette() {
 
       const userRef = doc(db, 'users', user.id);
 
-      // ✅ consome giro + adiciona prêmio
+      // ✅ consome giro + adiciona saldo e ganho total
       await updateDoc(userRef, {
         girosRoleta: increment(-1),
         balance: increment(prize),
         totalEarned: increment(prize)
       });
 
-      // registra giro
+      // ✅ RESTAURADO: Seu registro original e isolado apenas dos giros da roleta
       await addDoc(collection(db, 'users', user.id, 'rouletteSpins'), {
         prize,
         createdAt: serverTimestamp()
       });
 
-      // registra transação
+      // ✅ ADICIONADO: Registra também na coleção geral de transações (para aparecer no extrato do usuário)
       await addDoc(collection(db, 'users', user.id, 'transactions'), {
         type: 'roulette',
         amount: prize,
