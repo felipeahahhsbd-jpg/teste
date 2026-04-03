@@ -28,8 +28,8 @@ export default function Roulette({ onSpinComplete }: RouletteProps) {
   ];
 
   const segmentAngle = 360 / segments.length; // 45 graus cada
-  const spinsAvailable = user?.spinsAvailable || 0;
-  const canSpin = spinsAvailable > 0;
+  const spinsAvailable = user?.girosRoleta || 0;
+  const canSpin = girosRoleta > 0;
 
   // Lógica de Probabilidade (Pesos)
   const getPrizeIndex = () => {
