@@ -28,8 +28,10 @@ export default function Roulette({ onSpinComplete }: RouletteProps) {
   ];
 
   const segmentAngle = 360 / segments.length; // 45 graus cada
-  const spinsAvailable = user?.girosRoleta || 0;
-  const canSpin = girosRoleta > 0;
+  
+  // ✅ CORRIGIDO: Lê diretamente de girosRoleta
+  const girosDisponiveis = user?.girosRoleta || 0;
+  const canSpin = girosDisponiveis > 0;
 
   // Lógica de Probabilidade (Pesos)
   const getPrizeIndex = () => {
@@ -42,7 +44,6 @@ export default function Roulette({ onSpinComplete }: RouletteProps) {
     if (random < 100) return 4;     // 0.5% de chance para R$ 20
     
     return 0; // Fallback
-    // Valores 35, 50 e 100 não estão no range, logo possuem 0% de chance.
   };
 
   const handleSpin = async () => {
@@ -56,16 +57,10 @@ export default function Roulette({ onSpinComplete }: RouletteProps) {
       const prize = segments[selectedIndex].value;
 
       // Cálculo de Rotação Absoluta
-      // 1. Quantas voltas completas já demos?
       const currentFullTurns = Math.floor(rotation / 360);
-      // 2. Adicionamos 10 voltas para a animação ser longa e rápida
       const extraSpins = 10 * 360;
-      // 3. O ângulo do prêmio: 
-      // Para o Index 0 parar no topo, a rotação deve ser 0 (pois o SVG começa em -90).
-      // Mas para centralizar o ponteiro no meio da fatia, compensamos em half segment.
       const stopAngle = 360 - (selectedIndex * segmentAngle);
       
-      // Pequena variação (max 10 graus) para não ser robótico, mas sem tocar na linha
       const safeVariance = (Math.random() - 0.5) * 15;
 
       const finalRotation = (currentFullTurns * 360) + extraSpins + stopAngle - (segmentAngle / 2) + safeVariance;
@@ -102,7 +97,8 @@ export default function Roulette({ onSpinComplete }: RouletteProps) {
         </div>
         <div className="bg-[#0a0a0a] border border-[#1a1a1a] px-3 py-1 rounded-full">
           <span className="text-sm text-gray-400">Giros: </span>
-          <span className="font-bold text-[#22c55e]">{spinsAvailable}</span>
+          {/* ✅ CORRIGIDO: Mostra o número real do banco */}
+          <span className="font-bold text-[#22c55e]">{girosDisponiveis}</span>
         </div>
       </div>
 
@@ -119,7 +115,6 @@ export default function Roulette({ onSpinComplete }: RouletteProps) {
       </div>
 
       <div className="relative flex justify-center items-center py-6">
-        {/* SETA INDICADORA (Fica fixa no topo) */}
         <div className="absolute top-2 z-30">
           <div className="w-0 h-0 border-l-[15px] border-r-[15px] border-t-[25px] border-l-transparent border-r-transparent border-t-[#22c55e] drop-shadow-[0_0_10px_rgba(34,197,94,0.5)]" />
         </div>
